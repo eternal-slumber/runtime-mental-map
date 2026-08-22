@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RuntimeEvent",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "trace_id",
+    "span_id",
+    "parent_id",
+    "kind",
+    "runtime",
+    "framework",
+    "layer",
+    "name",
+    "class",
+    "method",
+    "started_at_unix_us",
+    "duration_ns"
+  ],
+  "properties": {
+    "trace_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "span_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parent_id": {
+      "type": ["string", "null"]
+    },
+    "kind": {
+      "enum": ["request", "method", "sql"]
+    },
+    "runtime": {
+      "type": "string",
+      "minLength": 1
+    },
+    "framework": {
+      "type": "string",
+      "minLength": 1
+    },
+    "layer": {
+      "type": ["string", "null"]
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "class": {
+      "type": ["string", "null"]
+    },
+    "method": {
+      "type": ["string", "null"]
+    },
+    "started_at_unix_us": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "duration_ns": {
+      "type": "integer",
+      "minimum": 0
+    }
+  }
+}
