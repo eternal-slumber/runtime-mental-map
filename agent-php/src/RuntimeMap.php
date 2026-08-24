@@ -12,6 +12,9 @@ final class RuntimeMap
     private static ?string $traceId = null;
     private static string $framework = 'php';
 
+    /** @var list<array<string, mixed>> */
+    private static array $events = [];
+
     /** @var list<string> */
     private static array $stack = [];
 
@@ -51,11 +54,13 @@ final class RuntimeMap
             return;
         }
 
-        try {
-            self::finishAndSend(self::$requestSpan);
-        } finally {
-            self::reset();
-        }
+        self::finishSpan(self::$requestSpan);
+
+        $collectorUrl = self::$collectorUrl;
+        $events = self::$events;
+
+        self::reset();
+        self::sendBatch($collectorUrl, $events);
     }
 
     public static function traceId(): ?string
@@ -63,7 +68,13 @@ final class RuntimeMap
         return self::$traceId;
     }
 
-    public static function enterAutoSpan(string $layer, string $class, string $method): void
+    public static function enterSpan(
+        string $kind,
+        ?string $layer,
+        string $name,
+        ?string $class = null,
+        ?string $method = null,
+    ): void
     {
         if (self::$traceId === null) {
             self::$autoFrames[] = null;
@@ -74,9 +85,9 @@ final class RuntimeMap
         $span = self::event(
             spanId: self::id(),
             parentId: self::currentSpanId(),
-            kind: 'method',
+            kind: $kind,
             layer: $layer,
-            name: $class.'::'.$method,
+            name: $name,
             class: $class,
             method: $method,
         );
@@ -85,7 +96,7 @@ final class RuntimeMap
         self::$autoFrames[] = $span;
     }
 
-    public static function leaveAutoSpan(): void
+    public static function leaveSpan(): void
     {
         $span = array_pop(self::$autoFrames);
 
@@ -94,7 +105,26 @@ final class RuntimeMap
         }
 
         array_pop(self::$stack);
-        self::finishAndSend($span);
+        self::finishSpan($span);
+    }
+
+    public static function enterAutoSpan(
+        string $layer,
+        string $class,
+        string $method,
+    ): void {
+        self::enterSpan(
+            kind: 'method',
+            layer: $layer,
+            name: $class.'::'.$method,
+            class: $class,
+            method: $method,
+        );
+    }
+
+    public static function leaveAutoSpan(): void
+    {
+        self::leaveSpan();
     }
 
     /**
@@ -126,18 +156,24 @@ final class RuntimeMap
         ];
     }
 
-    /** @param array<string, mixed> $span */
-    private static function finishAndSend(array $span): void
+    /**
+     * @param array<string, mixed> $span
+     */
+    private static function finishSpan(array $span): void
     {
         $span['duration_ns'] = hrtime(true) - $span['_started_ns'];
         unset($span['_started_ns']);
-        self::send($span);
+        self::$events[] = $span;
     }
 
-    /** @param array<string, mixed> $event */
-    private static function send(array $event): void
-    {
-        if (self::$collectorUrl === null) {
+    /**
+     * @param list<array<string, mixed>> $events
+     */
+    private static function sendBatch(
+        ?string $collectorUrl,
+        array $events,
+    ): void {
+        if ($collectorUrl === null || $events === []) {
             return;
         }
 
@@ -146,20 +182,20 @@ final class RuntimeMap
                 'http' => [
                     'method' => 'POST',
                     'header' => "Content-Type: application/json\r\nConnection: close",
-                    'content' => json_encode($event, JSON_THROW_ON_ERROR),
-                    'timeout' => 0.5,
+                    'content' => json_encode($events, JSON_THROW_ON_ERROR),
+                    'timeout' => 1.0,
                     'ignore_errors' => true,
                 ],
             ]);
-            $result = @file_get_contents(self::$collectorUrl.'/events', false, $context);
+            $result = @file_get_contents(
+                $collectorUrl.'/events/batch',
+                false,
+                $context,
+            );
             $status = $http_response_header[0] ?? '';
 
             if ($result === false || !str_contains($status, ' 202 ')) {
-                error_log(sprintf(
-                    'RuntimeMap failed to send span %s: %s',
-                    $event['span_id'],
-                    $status ?: 'collector unavailable',
-                ));
+                error_log('RuntimeMap failed to send batch: '.($status ?: 'collector unavailable'));
             }
         } catch (Throwable $exception) {
             error_log('RuntimeMap error: '.$exception->getMessage());
@@ -183,6 +219,7 @@ final class RuntimeMap
         self::$collectorUrl = null;
         self::$traceId = null;
         self::$framework = 'php';
+        self::$events = [];
         self::$stack = [];
         self::$requestSpan = null;
         self::$autoFrames = [];

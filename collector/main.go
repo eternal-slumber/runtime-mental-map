@@ -61,6 +61,7 @@ func main() {
 	store := &Store{traces: make(map[string]map[string]Event)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /events", store.addEvent)
+	mux.HandleFunc("POST /events/batch", store.addEvents)
 	mux.HandleFunc("GET /traces", store.getTraces)
 	mux.HandleFunc("GET /traces/{traceID}", store.getTrace)
 	log.Println("collector listening on http://localhost:9000")
@@ -88,6 +89,47 @@ func (s *Store) addEvent(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
 	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (s *Store) addEvents(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<20)
+
+	var events []Event
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+
+	if err := decoder.Decode(&events); err != nil {
+		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := ensureJSONEnded(decoder); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(events) == 0 {
+		http.Error(w, "events cannot be empty", http.StatusUnprocessableEntity)
+		return
+	}
+	if len(events) > 10_000 {
+		http.Error(w, "too many events", http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	for _, event := range events {
+		if err := validate(event); err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+			return
+		}
+	}
+
+	for _, event := range events {
+		if err := s.save(event); err != nil {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+	}
+
 	w.WriteHeader(http.StatusAccepted)
 }
 
@@ -377,6 +419,9 @@ func writeNode(output *strings.Builder, current *SpanNode, prefix, connector str
 func label(event Event) string {
 	if event.Kind == "request" {
 		return "HTTP " + event.Name
+	}
+	if event.Kind == "sql" {
+		return fmt.Sprintf("%s %s", event.Name, time.Duration(event.DurationNS))
 	}
 	if event.Layer != nil {
 		return *event.Layer + ": " + event.Name

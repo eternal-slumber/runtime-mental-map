@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestIncompleteTraceBecomesComplete(t *testing.T) {
@@ -27,6 +30,35 @@ func TestIncompleteTraceBecomesComplete(t *testing.T) {
 	complete := buildTrace("trace-abc", events)
 	if complete.Status != "complete" || complete.Root == nil || len(complete.Orphans) != 0 {
 		t.Fatalf("expected complete trace, got %#v", complete)
+	}
+}
+
+func TestBatchEndpointAcceptsChildrenBeforeRoot(t *testing.T) {
+	store := &Store{traces: make(map[string]map[string]Event)}
+	rootID := "request-1"
+	root := testEvent(rootID, nil, "GET /test", 1)
+	root.Kind = "request"
+	child := testEvent("sql-1", &rootID, "SQL SELECT 1", 2)
+	child.Kind = "sql"
+	child.DurationNS = int64(1200 * time.Microsecond)
+	body, err := json.Marshal([]Event{child, root})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	request := httptest.NewRequest("POST", "/events/batch", bytes.NewReader(body))
+	store.addEvents(response, request)
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf("unexpected response: %d %s", response.Code, response.Body.String())
+	}
+	view := buildTrace("trace-abc", []Event{store.traces["trace-abc"][rootID], store.traces["trace-abc"]["sql-1"]})
+	if view.Status != "complete" || view.Root == nil || len(view.Root.Children) != 1 {
+		t.Fatalf("expected complete batch trace, got %#v", view)
+	}
+	if got := label(child); got != "SQL SELECT 1 1.2ms" {
+		t.Fatalf("unexpected SQL label: %s", got)
 	}
 }
 
