@@ -9,6 +9,7 @@ use Psr\Http\Message\ServerRequestInterface;
 use Psr\Http\Server\MiddlewareInterface;
 use Psr\Http\Server\RequestHandlerInterface;
 use RuntimeMentalMap\RuntimeMap;
+use Throwable;
 
 final readonly class RuntimeMapMiddleware implements MiddlewareInterface
 {
@@ -25,15 +26,24 @@ final readonly class RuntimeMapMiddleware implements MiddlewareInterface
             collectorUrl: $this->collectorUrl,
         );
 
+        $status = 500;
+
         try {
             $response = $handler->handle($request);
+            $status = $response->getStatusCode();
             $traceId = RuntimeMap::traceId();
 
             return $traceId === null
                 ? $response
-                : $response->withHeader('X-Runtime-Trace-Id', $traceId);
+                : $response->withHeader(
+                    'X-Runtime-Trace-Id',
+                    $traceId,
+                );
+        } catch (Throwable $exception) {
+            RuntimeMap::recordException($exception);
+            throw $exception;
         } finally {
-            RuntimeMap::finishRequest();
+            RuntimeMap::finishRequest($status);
         }
     }
 }

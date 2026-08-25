@@ -81,7 +81,7 @@ final class AutoInstrumentation
                 mixed $returnValue,
                 ?Throwable $exception,
             ) {
-                RuntimeMap::leaveAutoSpan();
+                RuntimeMap::leaveAutoSpan($exception);
             },
         );
     }

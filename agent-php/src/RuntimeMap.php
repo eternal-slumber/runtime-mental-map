@@ -24,6 +24,8 @@ final class RuntimeMap
     /** @var list<array<string, mixed>|null> */
     private static array $autoFrames = [];
 
+    private static ?Throwable $requestException = null;
+
     public static function startRequest(
         string $method,
         string $path,
@@ -48,19 +50,33 @@ final class RuntimeMap
         );
     }
 
-    public static function finishRequest(): void
+    public static function finishRequest(int $httpStatus): void
     {
         if (self::$requestSpan === null) {
             return;
         }
 
-        self::finishSpan(self::$requestSpan);
+        self::finishSpan(
+            self::$requestSpan,
+            self::$requestException,
+            $httpStatus,
+        );
 
         $collectorUrl = self::$collectorUrl;
         $events = self::$events;
 
         self::reset();
         self::sendBatch($collectorUrl, $events);
+    }
+
+    public static function recordException(Throwable $exception): void
+    {
+        if (
+            self::$traceId !== null
+            && self::$requestException === null
+        ) {
+            self::$requestException = $exception;
+        }
     }
 
     public static function traceId(): ?string
@@ -96,7 +112,9 @@ final class RuntimeMap
         self::$autoFrames[] = $span;
     }
 
-    public static function leaveSpan(): void
+    public static function leaveSpan(
+        ?Throwable $exception = null,
+    ): void
     {
         $span = array_pop(self::$autoFrames);
 
@@ -105,7 +123,7 @@ final class RuntimeMap
         }
 
         array_pop(self::$stack);
-        self::finishSpan($span);
+        self::finishSpan($span, $exception);
     }
 
     public static function enterAutoSpan(
@@ -122,9 +140,11 @@ final class RuntimeMap
         );
     }
 
-    public static function leaveAutoSpan(): void
+    public static function leaveAutoSpan(
+        ?Throwable $exception = null,
+    ): void
     {
-        self::leaveSpan();
+        self::leaveSpan($exception);
     }
 
     /**
@@ -159,10 +179,27 @@ final class RuntimeMap
     /**
      * @param array<string, mixed> $span
      */
-    private static function finishSpan(array $span): void
-    {
+    private static function finishSpan(
+        array $span,
+        ?Throwable $exception = null,
+        ?int $httpStatus = null,
+    ): void {
         $span['duration_ns'] = hrtime(true) - $span['_started_ns'];
         unset($span['_started_ns']);
+
+        $span['http_status'] = $httpStatus;
+        $span['outcome'] = $httpStatus === null
+            ? ($exception === null ? 'success' : 'exception')
+            : self::httpOutcome($httpStatus, $exception);
+
+        $span['error_type'] = $exception === null
+            ? null
+            : $exception::class;
+
+        $span['error_message'] = $exception?->getMessage();
+        $span['error_file'] = $exception?->getFile();
+        $span['error_line'] = $exception?->getLine();
+
         self::$events[] = $span;
     }
 
@@ -209,6 +246,23 @@ final class RuntimeMap
         return $index === null ? null : self::$stack[$index];
     }
 
+    private static function httpOutcome(
+        int $status,
+        ?Throwable $exception,
+    ): string {
+        if ($status < 400) {
+            return 'success';
+        }
+
+        if ($status < 500) {
+            return 'client_error';
+        }
+
+        return $exception === null
+            ? 'server_error'
+            : 'exception';
+    }
+
     private static function id(): string
     {
         return bin2hex(random_bytes(16));
@@ -223,5 +277,6 @@ final class RuntimeMap
         self::$stack = [];
         self::$requestSpan = null;
         self::$autoFrames = [];
+        self::$requestException = null;
     }
 }

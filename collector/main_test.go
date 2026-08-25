@@ -87,6 +87,31 @@ func TestInvalidEventsAreRejected(t *testing.T) {
 	}
 }
 
+func TestOutcomeValidationAndRequestLabel(t *testing.T) {
+	for _, outcome := range []string{"", "success", "client_error", "server_error", "exception"} {
+		event := testEvent("span-"+outcome, nil, "GET /test", 1)
+		event.Outcome = outcome
+		if err := validate(event); err != nil {
+			t.Fatalf("outcome %q should be valid: %v", outcome, err)
+		}
+	}
+
+	invalid := testEvent("invalid", nil, "GET /test", 1)
+	invalid.Outcome = "unknown"
+	if err := validate(invalid); err == nil {
+		t.Fatal("unknown outcome must be rejected")
+	}
+
+	status := 404
+	request := testEvent("request", nil, "GET /missing", 1)
+	request.Kind = "request"
+	request.Outcome = "client_error"
+	request.HTTPStatus = &status
+	if got := label(request); got != "HTTP GET /missing [404 client_error]" {
+		t.Fatalf("unexpected request label: %s", got)
+	}
+}
+
 func TestCycleIsRejected(t *testing.T) {
 	store := &Store{traces: make(map[string]map[string]Event)}
 	b, c, a := "B", "C", "A"

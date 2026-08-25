@@ -60,6 +60,32 @@
     "duration_ns": {
       "type": "integer",
       "minimum": 0
+    },
+    "outcome": {
+      "enum": [
+        "success",
+        "client_error",
+        "server_error",
+        "exception"
+      ]
+    },
+    "http_status": {
+      "type": ["integer", "null"],
+      "minimum": 100,
+      "maximum": 599
+    },
+    "error_type": {
+      "type": ["string", "null"]
+    },
+    "error_message": {
+      "type": ["string", "null"]
+    },
+    "error_file": {
+      "type": ["string", "null"]
+    },
+    "error_line": {
+      "type": ["integer", "null"],
+      "minimum": 1
     }
   }
 }

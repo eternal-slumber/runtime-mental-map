@@ -40,7 +40,7 @@ final class PdoInstrumentation
                 mixed $returnValue,
                 ?Throwable $exception,
             ) {
-                RuntimeMap::leaveSpan();
+                RuntimeMap::leaveSpan($exception);
             },
         );
     }
@@ -68,7 +68,7 @@ final class PdoInstrumentation
                 mixed $returnValue,
                 ?Throwable $exception,
             ) {
-                RuntimeMap::leaveSpan();
+                RuntimeMap::leaveSpan($exception);
             },
         );
     }

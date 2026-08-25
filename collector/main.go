@@ -27,6 +27,13 @@ type Event struct {
 	Method          *string `json:"method"`
 	StartedAtUnixUS int64   `json:"started_at_unix_us"`
 	DurationNS      int64   `json:"duration_ns"`
+
+	Outcome      string  `json:"outcome,omitempty"`
+	HTTPStatus   *int    `json:"http_status,omitempty"`
+	ErrorType    *string `json:"error_type,omitempty"`
+	ErrorMessage *string `json:"error_message,omitempty"`
+	ErrorFile    *string `json:"error_file,omitempty"`
+	ErrorLine    *int    `json:"error_line,omitempty"`
 }
 
 type SpanNode struct {
@@ -50,6 +57,8 @@ type TraceSummary struct {
 	Name       string `json:"name"`
 	DurationNS int64  `json:"duration_ns"`
 	SpanCount  int    `json:"span_count"`
+	Outcome    string `json:"outcome,omitempty"`
+	HTTPStatus *int   `json:"http_status,omitempty"`
 }
 
 type Store struct {
@@ -195,6 +204,8 @@ func (s *Store) getTraces(w http.ResponseWriter, r *http.Request) {
 		if view.Root != nil {
 			summary.Name = view.Root.Name
 			summary.DurationNS = view.Root.DurationNS
+			summary.Outcome = view.Root.Outcome
+			summary.HTTPStatus = view.Root.HTTPStatus
 		}
 		summaries = append(summaries, summary)
 	}
@@ -267,6 +278,20 @@ func validate(event Event) error {
 	}
 	if event.DurationNS < 0 {
 		return errors.New("duration_ns cannot be negative")
+	}
+
+	switch event.Outcome {
+	case "", "success", "client_error", "server_error", "exception":
+	default:
+		return errors.New("invalid outcome")
+	}
+
+	if event.HTTPStatus != nil && (*event.HTTPStatus < 100 || *event.HTTPStatus > 599) {
+		return errors.New("http_status must be between 100 and 599")
+	}
+
+	if event.ErrorLine != nil && *event.ErrorLine < 1 {
+		return errors.New("error_line must be positive")
 	}
 	return nil
 }
@@ -418,15 +443,30 @@ func writeNode(output *strings.Builder, current *SpanNode, prefix, connector str
 
 func label(event Event) string {
 	if event.Kind == "request" {
-		return "HTTP " + event.Name
+		result := "HTTP " + event.Name
+		if event.HTTPStatus != nil {
+			result += fmt.Sprintf(" [%d %s]", *event.HTTPStatus, event.Outcome)
+		}
+		return result
+	}
+
+	result := event.Name
+	if event.Layer != nil {
+		result = *event.Layer + ": " + result
+	}
+	if event.Outcome == "exception" {
+		result += " ⚠"
+		if event.ErrorType != nil {
+			result += " " + *event.ErrorType
+		}
+		if event.ErrorMessage != nil {
+			result += ": " + *event.ErrorMessage
+		}
 	}
 	if event.Kind == "sql" {
-		return fmt.Sprintf("%s %s", event.Name, time.Duration(event.DurationNS))
+		result += " " + time.Duration(event.DurationNS).String()
 	}
-	if event.Layer != nil {
-		return *event.Layer + ": " + event.Name
-	}
-	return event.Name
+	return result
 }
 
 func wantsText(r *http.Request) bool {
