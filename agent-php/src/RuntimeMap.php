@@ -8,6 +8,10 @@ use Throwable;
 
 final class RuntimeMap
 {
+    private const PROTOCOL_VERSION = 1;
+
+    private static string $serviceName = 'php-app';
+
     private static ?string $collectorUrl = null;
     private static ?string $traceId = null;
     private static string $framework = 'php';
@@ -31,6 +35,7 @@ final class RuntimeMap
         string $path,
         string $framework,
         string $collectorUrl,
+        string $serviceName = 'php-app',
     ): void {
         self::reset();
 
@@ -38,6 +43,7 @@ final class RuntimeMap
         self::$collectorUrl = rtrim($collectorUrl, '/');
         self::$traceId = self::id();
         self::$framework = $framework;
+        self::$serviceName = $serviceName;
         self::$stack[] = $spanId;
         self::$requestSpan = self::event(
             spanId: $spanId,
@@ -160,6 +166,8 @@ final class RuntimeMap
         ?string $method,
     ): array {
         return [
+            'protocol_version' => self::PROTOCOL_VERSION,
+            'service_name' => self::$serviceName,
             'trace_id' => self::$traceId,
             'span_id' => $spanId,
             'parent_id' => $parentId,
@@ -278,5 +286,6 @@ final class RuntimeMap
         self::$requestSpan = null;
         self::$autoFrames = [];
         self::$requestException = null;
+        self::$serviceName = 'php-app';
     }
 }

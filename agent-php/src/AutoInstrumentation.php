@@ -11,6 +11,7 @@ final class AutoInstrumentation
 {
     /**
      * @param array<string, string> $layers directory => layer
+     * @param list<string> $exclude classes or namespace prefixes
      */
     public static function register(
         string $sourceDirectory,
@@ -20,6 +21,7 @@ final class AutoInstrumentation
             'Repositories' => 'infrastructure',
         ],
         string $namespace = 'App\\',
+        array $exclude = [],
     ): void {
         if (!function_exists('OpenTelemetry\\Instrumentation\\hook')) {
             error_log('RuntimeMap: OpenTelemetry extension is unavailable');
@@ -31,11 +33,35 @@ final class AutoInstrumentation
             foreach (glob(rtrim($sourceDirectory, '/').'/'.$directory.'/*.php') ?: [] as $file) {
                 $class = $namespace.str_replace('/', '\\', $directory).'\\'.pathinfo($file, PATHINFO_FILENAME);
 
-                if (class_exists($class)) {
+                if (
+                    !self::isExcluded($class, $exclude)
+                    && class_exists($class)
+                ) {
                     self::registerClass($class, $layer);
                 }
             }
         }
+    }
+
+    /**
+     * @param list<string> $exclude
+     */
+    private static function isExcluded(
+        string $class,
+        array $exclude,
+    ): bool {
+        foreach ($exclude as $excluded) {
+            $excluded = rtrim($excluded, '\\');
+
+            if (
+                $class === $excluded
+                || str_starts_with($class, $excluded.'\\')
+            ) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** @param class-string $class */

@@ -13,7 +13,10 @@ use Throwable;
 
 final readonly class RuntimeMapMiddleware implements MiddlewareInterface
 {
-    public function __construct(private string $collectorUrl) {}
+    public function __construct(
+        private string $collectorUrl,
+        private string $serviceName = 'php-app',
+    ) {}
 
     public function process(
         ServerRequestInterface $request,
@@ -24,6 +27,7 @@ final readonly class RuntimeMapMiddleware implements MiddlewareInterface
             path: $request->getUri()->getPath(),
             framework: 'slim',
             collectorUrl: $this->collectorUrl,
+            serviceName: $this->serviceName,
         );
 
         $status = 500;

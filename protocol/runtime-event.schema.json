@@ -4,6 +4,8 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
+    "protocol_version",
+    "service_name",
     "trace_id",
     "span_id",
     "parent_id",
@@ -86,6 +88,14 @@
     "error_line": {
       "type": ["integer", "null"],
       "minimum": 1
+    },
+    "protocol_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "service_name": {
+      "type": "string",
+      "minLength": 1
     }
   }
 }

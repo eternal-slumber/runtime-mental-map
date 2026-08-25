@@ -15,6 +15,9 @@ import (
 )
 
 type Event struct {
+	ProtocolVersion int    `json:"protocol_version"`
+	ServiceName     string `json:"service_name"`
+
 	TraceID         string  `json:"trace_id"`
 	SpanID          string  `json:"span_id"`
 	ParentID        *string `json:"parent_id"`
@@ -52,13 +55,14 @@ type TraceView struct {
 }
 
 type TraceSummary struct {
-	TraceID    string `json:"trace_id"`
-	Status     string `json:"status"`
-	Name       string `json:"name"`
-	DurationNS int64  `json:"duration_ns"`
-	SpanCount  int    `json:"span_count"`
-	Outcome    string `json:"outcome,omitempty"`
-	HTTPStatus *int   `json:"http_status,omitempty"`
+	TraceID     string `json:"trace_id"`
+	ServiceName string `json:"service_name"`
+	Status      string `json:"status"`
+	Name        string `json:"name"`
+	DurationNS  int64  `json:"duration_ns"`
+	SpanCount   int    `json:"span_count"`
+	Outcome     string `json:"outcome,omitempty"`
+	HTTPStatus  *int   `json:"http_status,omitempty"`
 }
 
 type Store struct {
@@ -200,8 +204,14 @@ func (s *Store) getTraces(w http.ResponseWriter, r *http.Request) {
 	summaries := make([]TraceSummary, 0, len(traces))
 	for traceID, events := range traces {
 		view := buildTrace(traceID, events)
-		summary := TraceSummary{TraceID: traceID, Status: view.Status, SpanCount: len(events)}
+		summary := TraceSummary{
+			TraceID:     traceID,
+			ServiceName: events[0].ServiceName,
+			Status:      view.Status,
+			SpanCount:   len(events),
+		}
 		if view.Root != nil {
+			summary.ServiceName = view.Root.ServiceName
 			summary.Name = view.Root.Name
 			summary.DurationNS = view.Root.DurationNS
 			summary.Outcome = view.Root.Outcome
@@ -218,7 +228,7 @@ func (s *Store) getTraces(w http.ResponseWriter, r *http.Request) {
 			if name == "" {
 				name = "[waiting for root]"
 			}
-			fmt.Fprintf(w, "%s  [%s]  %s  %s  %d spans\n", summary.TraceID, summary.Status,
+			fmt.Fprintf(w, "%s  %s  [%s]  %s  %s  %d spans\n", summary.ServiceName, summary.TraceID, summary.Status,
 				name, time.Duration(summary.DurationNS), summary.SpanCount)
 		}
 		return
@@ -243,13 +253,22 @@ func (s *Store) getTrace(w http.ResponseWriter, r *http.Request) {
 	view := buildTrace(traceID, events)
 	if wantsText(r) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		_, _ = io.WriteString(w, renderText(view))
+		hideServiceSQL := r.URL.Query().Get("hide_service_sql") == "1"
+		_, _ = io.WriteString(w, renderText(view, hideServiceSQL))
 		return
 	}
 	writeJSON(w, view)
 }
 
 func validate(event Event) error {
+	if event.ProtocolVersion != 1 {
+		return errors.New("unsupported protocol_version")
+	}
+
+	if event.ServiceName == "" {
+		return errors.New("service_name is required")
+	}
+
 	if event.TraceID == "" {
 		return errors.New("trace_id is required")
 	}
@@ -392,20 +411,21 @@ func sortNodes(nodes []*SpanNode) {
 	}
 }
 
-func renderText(view TraceView) string {
+func renderText(view TraceView, hideServiceSQL bool) string {
 	var output strings.Builder
 	fmt.Fprintf(&output, "Trace %s [%s]\n", view.TraceID, view.Status)
 	if view.Root != nil {
-		writeNode(&output, view.Root, "", "")
+		writeNode(&output, view.Root, "", "", hideServiceSQL)
 	}
-	if len(view.Orphans) > 0 {
+	orphans := visibleNodes(view.Orphans, hideServiceSQL)
+	if len(orphans) > 0 {
 		output.WriteString("orphan spans:\n")
-		for i, orphan := range view.Orphans {
+		for i, orphan := range orphans {
 			connector := "├── "
-			if i == len(view.Orphans)-1 {
+			if i == len(orphans)-1 {
 				connector = "└── "
 			}
-			writeNode(&output, orphan, "", connector)
+			writeNode(&output, orphan, "", connector, hideServiceSQL)
 		}
 	}
 	if len(view.MissingParents) > 0 {
@@ -424,9 +444,10 @@ func renderText(view TraceView) string {
 	return output.String()
 }
 
-func writeNode(output *strings.Builder, current *SpanNode, prefix, connector string) {
+func writeNode(output *strings.Builder, current *SpanNode, prefix, connector string, hideServiceSQL bool) {
 	fmt.Fprintf(output, "%s%s%s\n", prefix, connector, label(current.Event))
-	for i, child := range current.Children {
+	children := visibleNodes(current.Children, hideServiceSQL)
+	for i, child := range children {
 		childPrefix := prefix
 		if connector == "└── " {
 			childPrefix += "    "
@@ -434,11 +455,29 @@ func writeNode(output *strings.Builder, current *SpanNode, prefix, connector str
 			childPrefix += "│   "
 		}
 		childConnector := "├── "
-		if i == len(current.Children)-1 {
+		if i == len(children)-1 {
 			childConnector = "└── "
 		}
-		writeNode(output, child, childPrefix, childConnector)
+		writeNode(output, child, childPrefix, childConnector, hideServiceSQL)
 	}
+}
+
+func visibleNodes(nodes []*SpanNode, hideServiceSQL bool) []*SpanNode {
+	if !hideServiceSQL {
+		return nodes
+	}
+
+	visible := make([]*SpanNode, 0, len(nodes))
+	for _, node := range nodes {
+		if !isServiceSQL(node.Event) {
+			visible = append(visible, node)
+		}
+	}
+	return visible
+}
+
+func isServiceSQL(event Event) bool {
+	return event.Kind == "sql" && strings.HasPrefix(event.Name, "SQL SET ")
 }
 
 func label(event Event) string {

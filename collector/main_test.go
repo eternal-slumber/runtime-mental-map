@@ -112,6 +112,31 @@ func TestOutcomeValidationAndRequestLabel(t *testing.T) {
 	}
 }
 
+func TestTextTraceCanHideServiceSQL(t *testing.T) {
+	rootID := "request-1"
+	root := testEvent(rootID, nil, "GET /test", 1)
+	root.Kind = "request"
+
+	serviceSQL := testEvent("sql-set", &rootID, "SQL SET time_zone = '+00:00'", 2)
+	serviceSQL.Kind = "sql"
+	querySQL := testEvent("sql-select", &rootID, "SQL SELECT * FROM users", 3)
+	querySQL.Kind = "sql"
+
+	view := buildTrace("trace-abc", []Event{root, serviceSQL, querySQL})
+	full := renderText(view, false)
+	filtered := renderText(view, true)
+
+	if !strings.Contains(full, serviceSQL.Name) {
+		t.Fatal("service SQL must be visible by default")
+	}
+	if strings.Contains(filtered, serviceSQL.Name) {
+		t.Fatal("service SQL must be hidden when the filter is enabled")
+	}
+	if !strings.Contains(filtered, querySQL.Name) {
+		t.Fatal("application SQL must remain visible")
+	}
+}
+
 func TestCycleIsRejected(t *testing.T) {
 	store := &Store{traces: make(map[string]map[string]Event)}
 	b, c, a := "B", "C", "A"
@@ -156,12 +181,37 @@ func TestTraceEndpointsReturnJSONAndText(t *testing.T) {
 	if listResponse.Code != http.StatusOK || !strings.Contains(listResponse.Body.String(), `"span_count": 1`) {
 		t.Fatalf("unexpected list response: %d %s", listResponse.Code, listResponse.Body.String())
 	}
+	if !strings.Contains(listResponse.Body.String(), `"service_name": "test-service"`) {
+		t.Fatalf("service name is missing: %s", listResponse.Body.String())
+	}
+}
+
+func TestProtocolMetadataIsValidated(t *testing.T) {
+	event := testEvent("span-1", nil, "TestService::run", 1)
+
+	event.ProtocolVersion = 2
+	if err := validate(event); err == nil {
+		t.Fatal("unsupported protocol version must be rejected")
+	}
+
+	event.ProtocolVersion = 1
+	event.ServiceName = ""
+	if err := validate(event); err == nil {
+		t.Fatal("empty service name must be rejected")
+	}
 }
 
 func testEvent(spanID string, parentID *string, name string, startedAt int64) Event {
 	return Event{
-		TraceID: "trace-abc", SpanID: spanID, ParentID: parentID,
-		Kind: "method", Runtime: "php", Framework: "laravel",
-		Name: name, StartedAtUnixUS: startedAt,
+		ProtocolVersion: 1,
+		ServiceName:     "test-service",
+		TraceID:         "trace-abc",
+		SpanID:          spanID,
+		ParentID:        parentID,
+		Kind:            "method",
+		Runtime:         "php",
+		Framework:       "laravel",
+		Name:            name,
+		StartedAtUnixUS: startedAt,
 	}
 }
