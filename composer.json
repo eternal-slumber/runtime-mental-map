@@ -15,7 +15,7 @@
     },
     "autoload": {
         "psr-4": {
-            "RuntimeMentalMap\\": "src/"
+            "RuntimeMentalMap\\": "agent-php/src/"
         }
     },
     "extra": {

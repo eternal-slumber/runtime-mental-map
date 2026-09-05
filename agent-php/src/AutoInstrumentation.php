@@ -4,7 +4,11 @@ declare(strict_types=1);
 
 namespace RuntimeMentalMap;
 
+use FilesystemIterator;
+use RecursiveDirectoryIterator;
+use RecursiveIteratorIterator;
 use ReflectionClass;
+use SplFileInfo;
 use Throwable;
 
 final class AutoInstrumentation
@@ -29,9 +33,37 @@ final class AutoInstrumentation
             return;
         }
 
+        $sourceDirectory = realpath($sourceDirectory);
+
+        if ($sourceDirectory === false) {
+            error_log('RuntimeMap: source directory does not exist');
+
+            return;
+        }
+
+        $sourceDirectory = str_replace(
+            '\\',
+            '/',
+            $sourceDirectory,
+        );
+
         foreach ($layers as $directory => $layer) {
-            foreach (glob(rtrim($sourceDirectory, '/').'/'.$directory.'/*.php') ?: [] as $file) {
-                $class = $namespace.str_replace('/', '\\', $directory).'\\'.pathinfo($file, PATHINFO_FILENAME);
+            $layerDirectory = $sourceDirectory
+                . '/'
+                . trim($directory, '/');
+
+            foreach (self::phpFiles($layerDirectory) as $file) {
+                $relativePath = substr(
+                    $file,
+                    strlen($sourceDirectory) + 1,
+                    -4,
+                );
+
+                $class = $namespace . str_replace(
+                    '/',
+                    '\\',
+                    $relativePath,
+                );
 
                 if (
                     !self::isExcluded($class, $exclude)
@@ -40,6 +72,40 @@ final class AutoInstrumentation
                     self::registerClass($class, $layer);
                 }
             }
+        }
+    }
+
+    /**
+     * @return iterable<string>
+     */
+    private static function phpFiles(
+        string $directory,
+    ): iterable {
+        if (!is_dir($directory)) {
+            return;
+        }
+
+        $iterator = new RecursiveIteratorIterator(
+            new RecursiveDirectoryIterator(
+                $directory,
+                FilesystemIterator::SKIP_DOTS,
+            )
+        );
+
+        foreach ($iterator as $file) {
+            if (
+                !$file instanceof SplFileInfo
+                || !$file->isFile()
+                || $file->getExtension() !== 'php'
+            ) {
+                continue;
+            }
+
+            yield str_replace(
+                '\\',
+                '/',
+                $file->getPathname(),
+            );
         }
     }
 
@@ -55,7 +121,7 @@ final class AutoInstrumentation
 
             if (
                 $class === $excluded
-                || str_starts_with($class, $excluded.'\\')
+                || str_starts_with($class, $excluded . '\\')
             ) {
                 return true;
             }
