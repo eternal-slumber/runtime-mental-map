@@ -1,8 +1,9 @@
+import { initialLayout, architectureFields } from '../src/canvasLayout.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
   groupGraphByClass,
-  layoutGraphByLane,
+  summarizeGroupMembers,
   traceToGraph,
   type SpanNode,
   type TraceView,
@@ -116,6 +117,10 @@ test('converts a trace tree and optionally hides service SQL', () => {
     [0, 1, 2, 2, 3],
   )
   assert.deepEqual(
+    filtered.nodes.map((node) => node.sequence),
+    [0, 1, 2, 3, 4],
+  )
+  assert.deepEqual(
     filtered.nodes.map((node) => node.lane),
     ['request', 'controller', 'controller', 'repository', 'database'],
   )
@@ -153,6 +158,83 @@ test('converts a trace tree and optionally hides service SQL', () => {
     controllerGroup.members.map((node) => node.methodName),
     ['index', 'currentUser'],
   )
+  const currentUserNode = controllerGroup.members[1]
+  assert.ok(currentUserNode)
+  const methodNode = (
+    id: string,
+    method: string,
+    sequence: number,
+    siblingIndex: number,
+  ) => ({
+    ...currentUserNode,
+    id,
+    sequence,
+    siblingIndex,
+    methodName: method,
+    durationNs: 100_000,
+    selfDurationNs: 100_000,
+    span: {
+      ...currentUserNode.span,
+      span_id: id,
+      method,
+      parent_id: 'controller',
+    },
+  })
+  const summaries = summarizeGroupMembers({
+    ...controllerGroup,
+    members: [
+      methodNode('validate-1', 'validate', 10, 0),
+      methodNode('validate-2', 'validate', 15, 1),
+      methodNode('save', 'save', 20, 2),
+      methodNode('validate-3', 'validate', 25, 3),
+      methodNode('send', 'send', 30, 4),
+    ],
+  })
+  assert.deepEqual(
+    summaries.map((summary) => [
+      summary.labels,
+      summary.count,
+      summary.totalDurationNs,
+    ]),
+    [
+      [['validate()'], 2, 200_000],
+      [['save()'], 1, 100_000],
+      [['validate()'], 1, 100_000],
+      [['send()'], 1, 100_000],
+    ],
+  )
+
+  const uploadIteration = (
+    parentId: string,
+    sequence: number,
+  ) => ['thumbnailRelativePath', 'fullPath', 'isManagedUploadPath'].map(
+    (method, siblingIndex) => ({
+      ...methodNode(`${parentId}-${method}`, method, sequence + siblingIndex, siblingIndex),
+      parentContextKey: method === 'isManagedUploadPath'
+        ? 'method:App\\Services\\UploadedFileStorage:fullPath'
+        : 'method:App\\Services\\MealService:imageCacheToken',
+      span: {
+        ...currentUserNode.span,
+        span_id: `${parentId}-${method}`,
+        parent_id: method === 'isManagedUploadPath' ? `${parentId}-fullPath` : parentId,
+        method,
+      },
+    }),
+  )
+  const repeatedSequence = summarizeGroupMembers({
+    ...controllerGroup,
+    members: Array.from(
+      { length: 26 },
+      (_, index) => uploadIteration(`image-token-${index}`, 40 + index * 10),
+    ).flat(),
+  })
+  assert.deepEqual(
+    repeatedSequence.map((summary) => [summary.labels, summary.count]),
+    [[
+      ['thumbnailRelativePath()', 'fullPath()', 'isManagedUploadPath()'],
+      26,
+    ]],
+  )
   assert.deepEqual(
     grouped.edges.map((edge) => [edge.source, edge.target]),
     [
@@ -161,22 +243,31 @@ test('converts a trace tree and optionally hides service SQL', () => {
         'class:App\\Controllers\\UserController',
         'class:App\\Repositories\\UserRepository',
       ],
-      ['class:App\\Repositories\\UserRepository', 'select'],
+      ['class:App\\Repositories\\UserRepository', 'database:queries'],
     ],
   )
 
-  const layout = layoutGraphByLane(grouped)
+  const fullDatabaseGroup = groupGraphByClass(full).nodes.find(
+    (node) => node.id === 'database:queries',
+  )
+  assert.ok(fullDatabaseGroup)
   assert.deepEqual(
-    layout.columns.map((column) => column.lane),
+    fullDatabaseGroup.members.map((node) => node.id),
+    ['set', 'select'],
+  )
+
+  const layout = initialLayout(grouped)
+  assert.deepEqual(
+    architectureFields(grouped).map((column) => column.lane),
     ['request', 'controller', 'repository', 'database'],
   )
   assert.deepEqual(
-    layout.nodes.map((node) => [node.id, node.position.x]),
+    layout.map((node) => [node.id, node.x]),
     [
-      ['request', 0],
-      ['class:App\\Controllers\\UserController', 300],
-      ['class:App\\Repositories\\UserRepository', 600],
-      ['select', 900],
+      ['request', 24],
+      ['class:App\\Controllers\\UserController', 478],
+      ['class:App\\Repositories\\UserRepository', 898],
+      ['database:queries', 1284],
     ],
   )
 })
