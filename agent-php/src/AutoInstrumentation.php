@@ -22,7 +22,7 @@ final class AutoInstrumentation
         array $layers = [
             'Controllers' => 'controller',
             'Services' => 'application',
-            'Repositories' => 'infrastructure',
+            'Repositories' => 'repository',
         ],
         string $namespace = 'App\\',
         array $exclude = [],

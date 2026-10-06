@@ -24,7 +24,7 @@ return [
         'Http/Controllers' => 'controller',
         'Services' => 'application',
         'Domain' => 'domain',
-        'Repositories' => 'infrastructure',
+        'Repositories' => 'repository',
     ],
 
     'exclude_paths' => [],
