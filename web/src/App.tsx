@@ -21,10 +21,14 @@ import {
 } from './traceGraph'
 
 import { architectureFields, fieldState, initialLayout, type Point } from './canvasLayout'
+import { buildTraceFlows, type TimelineNode } from './traceTimeline'
 
 type TraceSummary = {
   trace_id: string
   service_name: string
+  flow_id?: string
+  parent_trace_id?: string
+  started_at_unix_us: number
   status: string
   name: string
   duration_ns: number
@@ -54,6 +58,49 @@ type MentalMap = MentalMapSummary & {
 
 function formatDuration(durationNs: number): string {
   return `${(durationNs / 1_000_000).toFixed(2)} ms`
+}
+
+function formatTime(startedAtUnixUS: number): string {
+  if (!Number.isFinite(startedAtUnixUS) || startedAtUnixUS <= 0) return 'time unavailable'
+  return new Date(startedAtUnixUS / 1_000).toLocaleTimeString([], {
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  })
+}
+
+function TraceTimeline({
+  nodes,
+  selectedTraceId,
+  onSelect,
+  nested = false,
+}: {
+  nodes: TimelineNode<TraceSummary>[]
+  selectedTraceId: string | null
+  onSelect: (traceId: string) => void
+  nested?: boolean
+}) {
+  return <ul className={`trace-list timeline-list ${nested ? 'timeline-children' : ''}`}>
+    {nodes.map((node) => <li className="timeline-item" key={node.trace.trace_id}>
+      <button
+        className="trace-select"
+        type="button"
+        aria-pressed={selectedTraceId === node.trace.trace_id}
+        onClick={() => onSelect(node.trace.trace_id)}
+      >
+        <span>{node.trace.service_name} · {formatTime(node.trace.started_at_unix_us)}</span>
+        <strong>{node.trace.name || 'Waiting for root'}</strong>
+        <small>
+          {node.trace.http_status ?? node.trace.status} · {formatDuration(node.trace.duration_ns)} ·{' '}
+          {node.trace.span_count} spans
+        </small>
+      </button>
+      {node.children.length > 0 && <TraceTimeline
+        nodes={node.children}
+        selectedTraceId={selectedTraceId}
+        onSelect={onSelect}
+        nested
+      />}
+    </li>)}
+  </ul>
 }
 
 class WorkspaceErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
@@ -154,6 +201,7 @@ function App() {
 
         const data: TraceSummary[] = await response.json()
         setTraces(data)
+        setError(null)
       } catch (error) {
         if (error instanceof Error && error.name !== 'AbortError') {
           setError(error.message)
@@ -165,7 +213,14 @@ function App() {
 
     void loadTraces()
 
-    return () => controller.abort()
+    const intervalId = window.setInterval(() => {
+      void loadTraces()
+    }, 2_000)
+
+    return () => {
+      window.clearInterval(intervalId)
+      controller.abort()
+    }
   }, [])
 
   useEffect(() => {
@@ -263,6 +318,7 @@ function App() {
   const selectedSummary = traces.find(
     (trace) => trace.trace_id === selectedTraceId,
   ) ?? null
+  const traceFlows = useMemo(() => buildTraceFlows(traces), [traces])
   const inspectorOpen = inspectorVisible && (selectedNote !== null
     || selectedGroup !== null
     || (selectedNode !== null && primaryNode !== null))
@@ -487,6 +543,19 @@ function App() {
     }))
   }
 
+  function openTrace(traceId: string): void {
+    selectNode(null)
+    setSelectedMap(null)
+    setNodeStates({})
+    setNotes([])
+    setGroups([])
+    setFieldStates([])
+    setManualEdges([])
+    setSequenceNames({})
+    setSavedViewport(null)
+    setSelectedTraceId(traceId)
+  }
+
   return (
     <main className="workspace" data-theme={theme}>
       <aside className="trace-sidebar">
@@ -513,36 +582,19 @@ function App() {
           <p className="message">No traces yet.</p>
         )}
 
-        <ul className="trace-list">
-          {traces.map((trace) => (
-            <li key={trace.trace_id}>
-              <button
-                className="trace-select"
-                type="button"
-                aria-pressed={selectedTraceId === trace.trace_id}
-                onClick={() => {
-                  selectNode(null)
-                  setSelectedMap(null)
-                  setNodeStates({})
-                  setNotes([])
-                  setGroups([])
-                  setFieldStates([])
-                  setManualEdges([])
-                  setSequenceNames({})
-                  setSavedViewport(null)
-                  setSelectedTraceId(trace.trace_id)
-                }}
-              >
-                <span>{trace.service_name}</span>
-                <strong>{trace.name || 'Waiting for root'}</strong>
-                <small>
-                  {trace.http_status ?? trace.status} · {formatDuration(trace.duration_ns)} ·{' '}
-                  {trace.span_count} spans
-                </small>
-              </button>
-            </li>
-          ))}
-        </ul>
+        <div className="flow-list">
+          {traceFlows.map((flow) => <section className="flow-group" key={flow.id}>
+            {flow.correlated && <header className="flow-header" title={flow.id}>
+              <strong>{flow.serviceName}</strong>
+              <span>{flow.requestCount} requests · {formatTime(flow.startedAtUnixUS)}</span>
+            </header>}
+            <TraceTimeline
+              nodes={flow.nodes}
+              selectedTraceId={selectedTraceId}
+              onSelect={openTrace}
+            />
+          </section>)}
+        </div>
 
         <header className="sidebar-section">
           <h2>Maps</h2>

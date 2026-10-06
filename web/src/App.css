@@ -149,6 +149,84 @@
   list-style: none;
 }
 
+.flow-list {
+  padding-bottom: 8px;
+}
+
+.flow-group {
+  padding: 5px 8px;
+}
+
+.flow-group + .flow-group {
+  border-top: 1px solid var(--border);
+}
+
+.flow-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px 5px;
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.flow-header strong {
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-header span {
+  flex: none;
+}
+
+.timeline-list {
+  padding: 0 0 0 12px;
+  border-left: 1px solid var(--border-strong);
+}
+
+.timeline-item {
+  position: relative;
+}
+
+.timeline-item > .trace-select {
+  position: relative;
+}
+
+.timeline-item > .trace-select::before {
+  content: '';
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: -15px;
+  width: 5px;
+  height: 5px;
+  background: var(--sidebar);
+  border: 1px solid var(--muted);
+  border-radius: 50%;
+  transform: translateY(-50%);
+}
+
+.timeline-children {
+  margin: 1px 0 4px 12px;
+}
+
+.timeline-children .timeline-item > .trace-select::before {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+
+.timeline-item > .trace-select[aria-pressed='true']::before {
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--sidebar);
+}
+
 .trace-select {
   display: grid;
   width: 100%;
