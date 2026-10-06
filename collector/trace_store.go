@@ -138,13 +138,22 @@ func (s *Store) getTraces(w http.ResponseWriter, r *http.Request) {
 		if view.Root != nil {
 			summary.ServiceName = view.Root.ServiceName
 			summary.Name = view.Root.Name
+			summary.FlowID = view.Root.FlowID
+			summary.ParentTraceID = view.Root.ParentTraceID
+			summary.StartedAtUnixUS = view.Root.StartedAtUnixUS
 			summary.DurationNS = view.Root.DurationNS
 			summary.Outcome = view.Root.Outcome
 			summary.HTTPStatus = view.Root.HTTPStatus
 		}
 		summaries = append(summaries, summary)
 	}
-	sort.Slice(summaries, func(i, j int) bool { return summaries[i].TraceID < summaries[j].TraceID })
+	sort.Slice(summaries, func(i, j int) bool {
+		if summaries[i].StartedAtUnixUS == summaries[j].StartedAtUnixUS {
+			return summaries[i].TraceID < summaries[j].TraceID
+		}
+
+		return summaries[i].StartedAtUnixUS > summaries[j].StartedAtUnixUS
+	})
 
 	if wantsText(r) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")

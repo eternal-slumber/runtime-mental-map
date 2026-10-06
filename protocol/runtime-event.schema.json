@@ -96,6 +96,16 @@
     "service_name": {
       "type": "string",
       "minLength": 1
+    },
+    "flow_id": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "parent_trace_id": {
+      "type": ["string", "null"],
+      "minLength": 1,
+      "maxLength": 128
     }
   }
 }

@@ -13,6 +13,8 @@ type Event struct {
 	TraceID         string  `json:"trace_id"`
 	SpanID          string  `json:"span_id"`
 	ParentID        *string `json:"parent_id"`
+	FlowID          *string `json:"flow_id,omitempty"`
+	ParentTraceID   *string `json:"parent_trace_id,omitempty"`
 	Kind            string  `json:"kind"`
 	Runtime         string  `json:"runtime"`
 	Framework       string  `json:"framework"`
@@ -47,14 +49,17 @@ type TraceView struct {
 }
 
 type TraceSummary struct {
-	TraceID     string `json:"trace_id"`
-	ServiceName string `json:"service_name"`
-	Status      string `json:"status"`
-	Name        string `json:"name"`
-	DurationNS  int64  `json:"duration_ns"`
-	SpanCount   int    `json:"span_count"`
-	Outcome     string `json:"outcome,omitempty"`
-	HTTPStatus  *int   `json:"http_status,omitempty"`
+	TraceID         string  `json:"trace_id"`
+	ServiceName     string  `json:"service_name"`
+	FlowID          *string `json:"flow_id,omitempty"`
+	ParentTraceID   *string `json:"parent_trace_id,omitempty"`
+	Status          string  `json:"status"`
+	Name            string  `json:"name"`
+	StartedAtUnixUS int64   `json:"started_at_unix_us"`
+	DurationNS      int64   `json:"duration_ns"`
+	SpanCount       int     `json:"span_count"`
+	Outcome         string  `json:"outcome,omitempty"`
+	HTTPStatus      *int    `json:"http_status,omitempty"`
 }
 
 func validate(event Event) error {
@@ -72,6 +77,20 @@ func validate(event Event) error {
 	}
 	if event.Name == "" {
 		return errors.New("name is required")
+	}
+	if event.FlowID != nil {
+		if len(*event.FlowID) == 0 || len(*event.FlowID) > 128 {
+			return errors.New("flow_id must contain between 1 and 128 characters")
+		}
+	}
+	if event.ParentTraceID != nil {
+		if len(*event.ParentTraceID) == 0 || len(*event.ParentTraceID) > 128 {
+			return errors.New("parent_trace_id must contain between 1 and 128 characters")
+		}
+
+		if *event.ParentTraceID == event.TraceID {
+			return errors.New("trace cannot be its own parent")
+		}
 	}
 	if event.Runtime == "" {
 		return errors.New("runtime is required")

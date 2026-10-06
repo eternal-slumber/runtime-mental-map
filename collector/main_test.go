@@ -199,6 +199,56 @@ func TestProtocolMetadataIsValidated(t *testing.T) {
 	if err := validate(event); err == nil {
 		t.Fatal("empty service name must be rejected")
 	}
+
+	empty, tooLong, sameTrace := "", strings.Repeat("x", 129), "trace-abc"
+	for name, invalid := range map[string]Event{
+		"empty flow":        withFlow(testEvent("flow-empty", nil, "GET /", 1), &empty, nil),
+		"long flow":         withFlow(testEvent("flow-long", nil, "GET /", 1), &tooLong, nil),
+		"self parent trace": withFlow(testEvent("trace-self", nil, "GET /", 1), nil, &sameTrace),
+	} {
+		if err := validate(invalid); err == nil {
+			t.Fatalf("%s must be rejected", name)
+		}
+	}
+}
+
+func TestTraceSummariesAreNewestFirstAndIncludeFlowMetadata(t *testing.T) {
+	store := &Store{traces: make(map[string]map[string]Event)}
+	flowID, parentTraceID := "page-1", "trace-parent"
+	older := withFlow(testEvent("request-old", nil, "GET /old", 100), &flowID, nil)
+	older.TraceID = "trace-old"
+	older.Kind = "request"
+	newer := withFlow(testEvent("request-new", nil, "GET /new", 200), &flowID, &parentTraceID)
+	newer.TraceID = "trace-new"
+	newer.Kind = "request"
+	if err := store.save(older); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.save(newer); err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	store.getTraces(response, httptest.NewRequest("GET", "/traces", nil))
+	var summaries []TraceSummary
+	if err := json.Unmarshal(response.Body.Bytes(), &summaries); err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 2 || summaries[0].TraceID != "trace-new" {
+		t.Fatalf("expected newest trace first, got %#v", summaries)
+	}
+	if summaries[0].StartedAtUnixUS != 200 || summaries[0].FlowID == nil || *summaries[0].FlowID != flowID {
+		t.Fatalf("missing chronological flow metadata: %#v", summaries[0])
+	}
+	if summaries[0].ParentTraceID == nil || *summaries[0].ParentTraceID != parentTraceID {
+		t.Fatalf("missing parent trace metadata: %#v", summaries[0])
+	}
+}
+
+func withFlow(event Event, flowID, parentTraceID *string) Event {
+	event.FlowID = flowID
+	event.ParentTraceID = parentTraceID
+	return event
 }
 
 func testEvent(spanID string, parentID *string, name string, startedAt int64) Event {

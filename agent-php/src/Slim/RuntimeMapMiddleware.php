@@ -22,12 +22,23 @@ final readonly class RuntimeMapMiddleware implements MiddlewareInterface
         ServerRequestInterface $request,
         RequestHandlerInterface $handler,
     ): ResponseInterface {
+        $flowId = trim(
+            $request->getHeaderLine('X-Runtime-Flow-Id'),
+        );
+        $parentTraceId = trim(
+            $request->getHeaderLine('X-Runtime-Parent-Trace-Id'),
+        );
+
         RuntimeMap::startRequest(
             method: $request->getMethod(),
             path: $request->getUri()->getPath(),
             framework: 'slim',
             collectorUrl: $this->collectorUrl,
             serviceName: $this->serviceName,
+            flowId: $flowId !== '' ? $flowId : null,
+            parentTraceId: $parentTraceId !== ''
+                ? $parentTraceId
+                : null,
         );
 
         $status = 500;

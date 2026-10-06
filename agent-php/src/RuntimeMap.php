@@ -36,6 +36,8 @@ final class RuntimeMap
         string $framework,
         string $collectorUrl,
         string $serviceName = 'php-app',
+        ?string $flowId = null,
+        ?string $parentTraceId = null,
     ): void {
         self::reset();
 
@@ -54,6 +56,8 @@ final class RuntimeMap
             class: null,
             method: null,
         );
+        self::$requestSpan['flow_id'] = $flowId;
+        self::$requestSpan['parent_trace_id'] = $parentTraceId;
     }
 
     public static function finishRequest(int $httpStatus): void

@@ -32,6 +32,15 @@ final class RuntimeMapMiddleware
             return $next($request);
         }
 
+        $flowId = trim((string) $request->headers->get(
+            'X-Runtime-Flow-Id',
+            '',
+        ));
+        $parentTraceId = trim((string) $request->headers->get(
+            'X-Runtime-Parent-Trace-Id',
+            '',
+        ));
+
         RuntimeMap::startRequest(
             method: $request->getMethod(),
             path: $path,
@@ -44,6 +53,10 @@ final class RuntimeMapMiddleware
                 'runtime-map.service_name',
                 'laravel-app',
             ),
+            flowId: $flowId !== '' ? $flowId : null,
+            parentTraceId: $parentTraceId !== ''
+                ? $parentTraceId
+                : null,
         );
 
         $status = 500;
