@@ -10,7 +10,9 @@ import {
 import {
   architectureFields,
   clampPositionToField,
+  constrainLayout,
   fieldState,
+  freePosition,
   initialLayout,
   MIN_FIELD_WIDTH,
   resizeField,
@@ -205,11 +207,20 @@ export function TraceCanvas(props: TraceCanvasProps) {
   const fields = useMemo(() => architectureFields(graph, fieldStates), [graph, fieldStates])
   // Manual positions are overlaid below; structural layout only changes with the graph or explicit field edits.
   const structuralLayout = useMemo(() => initialLayout(graph, {}, fieldStates), [graph, fieldStates])
-  const layout = useMemo(() => structuralLayout.map((box) => ({
-    ...box,
-    ...safePosition(nodeStates[box.id], box),
-  })), [structuralLayout, nodeStates])
-  const boxes = useMemo(() => layout.filter((box) => !nodeStates[box.id]?.hidden).map((box) => ({ ...box, ...sizes[box.id] })), [layout, sizes, nodeStates])
+  const layout = useMemo(() => {
+    const desired = structuralLayout.map((box) => ({
+      ...box,
+      ...sizes[box.id],
+      ...safePosition(nodeStates[box.id], box),
+    }))
+    const visible = constrainLayout(
+      desired.filter((box) => !nodeStates[box.id]?.hidden),
+      fields,
+    )
+    const visibleByID = new Map(visible.map((box) => [box.id, box]))
+    return desired.map((box) => visibleByID.get(box.id) ?? box)
+  }, [structuralLayout, sizes, nodeStates, fields])
+  const boxes = useMemo(() => layout.filter((box) => !nodeStates[box.id]?.hidden), [layout, nodeStates])
   const resizing = useRef<{ pointerId: number; clientX: number; field: ArchitectureField; boxes: Box[]; fields: ArchitectureField[] } | null>(null)
   const selectedSpans = useMemo(() => selection?.spanIds ?? graph.nodes.find((node) => node.id === selectedNodeId)?.members.map((member) => member.id), [selection, graph, selectedNodeId])
   const focused = useMemo(() => selectedSpans ? focusExecution(graph, selectedSpans) : null, [graph, selectedSpans])
@@ -368,7 +379,14 @@ export function TraceCanvas(props: TraceCanvasProps) {
         }
         const box = boxes.find((item) => item.id === node.id)
         const field = fields.find((item) => item.lane === box?.lane)
-        if (box && field) onPositionsChange({ [node.id]: clampPositionToField(box, field, node.position) })
+        if (box && field) {
+          const clamped = clampPositionToField(box, field, node.position)
+          const position = freePosition(
+            { ...box, ...clamped },
+            boxes.filter((item) => item.id !== node.id && item.lane === box.lane),
+          )
+          onPositionsChange({ [node.id]: { x: position.x, y: position.y } })
+        }
       }}
       onViewportChange={onViewportChange}
       onNodeClick={(_, node) => onNodeSelect(node.id)}

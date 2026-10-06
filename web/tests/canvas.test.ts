@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { focusExecution, groupDuration, groupGraphByClass, methodRows, querySections, querySource, traceToGraph, type SpanNode, type TraceView } from '../src/traceGraph.ts'
-import { architectureFields, clampPositionToField, initialLayout, resizeField, overlaps, safePosition, type Box } from '../src/canvasLayout.ts'
+import { architectureFields, clampPositionToField, constrainLayout, initialLayout, resizeField, overlaps, safePosition, type Box } from '../src/canvasLayout.ts'
 
 function method(id: string, cls: string, children: SpanNode[] = []): SpanNode {
   return { protocol_version: 1, service_name: 'canvas-check', trace_id: 'canvas-check', span_id: id,
@@ -61,7 +61,11 @@ test('new entities use free space at field center while saved coordinates stay e
   assert.deepEqual([boxes[1].x, boxes[1].y], [50, 500])
   assert.equal(boxes[2].x, 58)
   assert.ok(!overlaps(boxes[2], boxes[0]) && !overlaps(boxes[2], boxes[1]))
-  const restored = initialLayout(graph, Object.fromEntries(boxes.map((box) => [box.id, { x: box.x, y: box.y }])))
+  const restored = initialLayout(graph, Object.fromEntries(boxes.map((box) => [box.id, {
+    x: box.x,
+    y: box.y,
+    collapsed: box.id === 'class:B',
+  }])))
   assert.deepEqual(restored.map((box) => [box.x, box.y]), boxes.map((box) => [box.x, box.y]))
 })
 
@@ -153,7 +157,7 @@ test('auto layout works without a database anchor', () => {
   assert.ok(controllerBox.y > requestBox.y + requestBox.height + 100)
 })
 
-test('saved positions remain authoritative when graph fields change', () => {
+test('saved vertical positions survive field changes while nodes stay in their semantic fields', () => {
   const request = { ...method('request', '', [method('work', 'Service'), query('q')]), kind: 'request' as const, class: null, layer: 'request' }
   const { graph } = graphOf(request)
   const savedFields = [
@@ -164,8 +168,24 @@ test('saved positions remain authoritative when graph fields change', () => {
     'class:Service': { x: 24, y: 200 },
     'database:queries': { x: 444, y: 300 },
   }, savedFields)
-  assert.equal(boxes.find((box) => box.id === 'class:Service')?.x, 24)
-  assert.equal(boxes.find((box) => box.id === 'database:queries')?.x, 444)
+  assert.deepEqual(
+    boxes.filter((box) => ['class:Service', 'database:queries'].includes(box.id)).map((box) => [box.x, box.y]),
+    [[444, 200], [864, 300]],
+  )
+})
+
+test('measured cards are kept inside fields and cannot overlap', () => {
+  const fields = [{ id: 'field:application', lane: 'application' as const, x: 0, width: 420, manualMinWidth: 352 }]
+  const boxes: Box[] = [
+    { id: 'first', lane: 'application', x: 900, y: 100, width: 304, height: 280 },
+    { id: 'second', lane: 'application', x: 24, y: 180, width: 304, height: 160 },
+  ]
+  const constrained = constrainLayout(boxes, fields)
+
+  assert.equal(constrained[0].x, 92)
+  assert.equal(constrained[1].x, 24)
+  assert.ok(!overlaps(constrained[0], constrained[1]))
+  assert.equal(constrained[1].y, constrained[0].y + constrained[0].height + 36)
 })
 
 test('drag coordinates never resize fields and invalid positions fall back safely', () => {
@@ -192,7 +212,7 @@ test('drag coordinates never resize fields and invalid positions fall back safel
   assert.deepEqual([moved.boxes[1].x, moved.boxes[1].y], [644, 0])
   assert.equal(architectureFields(graph, [{ layer: 'application', x: 0, width: 1, manual_min_width: 1 }])[0].width, 352)
   const migrated = initialLayout(graph, { 'class:A': { x: -100, y: -150 } })
-  assert.deepEqual([migrated[0].x, migrated[0].y], [-100, -150])
+  assert.deepEqual([migrated[0].x, migrated[0].y], [24, -150])
   const recovered = initialLayout(graph, { 'class:A': { x: Number.NaN, y: Infinity } })[0]
   assert.ok(Number.isFinite(recovered.x) && Number.isFinite(recovered.y))
 })

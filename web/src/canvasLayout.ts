@@ -123,6 +123,25 @@ export function clampPositionToField(box: Box, field: ArchitectureField, positio
   return { x: Math.min(right, Math.max(left, safe.x)), y: safe.y }
 }
 
+export function constrainLayout(boxes: Box[], fields: ArchitectureField[]): Box[] {
+  const placed = new Map<string, Box>()
+
+  for (const field of fields) {
+    const occupied: Box[] = []
+    const candidates = boxes.filter((box) => box.lane === field.lane)
+      .sort((a, b) => a.y - b.y || a.x - b.x || a.id.localeCompare(b.id))
+
+    for (const box of candidates) {
+      const candidate = { ...box, ...clampPositionToField(box, field, box) }
+      const position = freePosition(candidate, occupied)
+      occupied.push(position)
+      placed.set(position.id, position)
+    }
+  }
+
+  return boxes.map((box) => placed.get(box.id) ?? box)
+}
+
 export function initialLayout(graph: GroupedCanvasGraph, saved: Record<string, StoredPosition> = {}, savedFields: SavedField[] = []): Box[] {
   const fields = architectureFields(graph, savedFields)
   const boxes = graph.nodes.map((node): Box => {
@@ -171,5 +190,10 @@ export function initialLayout(graph: GroupedCanvasGraph, saved: Record<string, S
     occupied.push(box)
   }
 
-  return boxes
+  const visible = constrainLayout(
+    boxes.filter((box) => !saved[box.id]?.hidden),
+    fields,
+  )
+  const visibleByID = new Map(visible.map((box) => [box.id, box]))
+  return boxes.map((box) => visibleByID.get(box.id) ?? box)
 }
