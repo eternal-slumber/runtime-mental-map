@@ -1,0 +1,10 @@
+services:
+  mental-map:
+    build: .
+    ports:
+      - "127.0.0.1:9000:9000"
+    volumes:
+      - mental-map-data:/data
+
+volumes:
+  mental-map-data:

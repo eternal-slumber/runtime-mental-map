@@ -1,5 +1,5 @@
 {
-    "name": "eternalslumber/runtime-mental-map-agent",
+    "name": "runtime-mental-map/agent-php",
     "description": "Development-time PHP runtime tracing agent",
     "type": "library",
     "license": "MIT",
@@ -9,6 +9,8 @@
         "psr/http-server-handler": "^1.0",
         "psr/http-server-middleware": "^1.0"
     },
+    "replace": {"eternalslumber/runtime-mental-map-agent": "self.version"},
+    "bin": ["agent-php/bin/mental-map"],
     "suggest": {
         "ext-opentelemetry": "Required for automatic method instrumentation",
         "laravel/framework": "Required when using the Laravel integration"
