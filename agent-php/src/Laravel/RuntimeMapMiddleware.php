@@ -41,23 +41,27 @@ final class RuntimeMapMiddleware
             '',
         ));
 
-        RuntimeMap::startRequest(
-            method: $request->getMethod(),
-            path: $path,
-            framework: 'laravel',
-            collectorUrl: (string) config(
-                'runtime-map.collector_url',
-                'http://127.0.0.1:9000',
-            ),
-            serviceName: (string) config(
-                'runtime-map.service_name',
-                'laravel-app',
-            ),
-            flowId: $flowId !== '' ? $flowId : null,
-            parentTraceId: $parentTraceId !== ''
-                ? $parentTraceId
-                : null,
-        );
+        try {
+            RuntimeMap::startRequest(
+                method: $request->getMethod(),
+                path: $path,
+                framework: 'laravel',
+                collectorUrl: (string) config(
+                    'runtime-map.collector_url',
+                    'http://127.0.0.1:9000',
+                ),
+                serviceName: (string) config(
+                    'runtime-map.service_name',
+                    'laravel-app',
+                ),
+                flowId: $flowId !== '' ? $flowId : null,
+                parentTraceId: $parentTraceId !== ''
+                    ? $parentTraceId
+                    : null,
+            );
+        } catch (Throwable $exception) {
+            return $next($request);
+        }
 
         $status = 500;
 
@@ -83,7 +87,11 @@ final class RuntimeMapMiddleware
 
             throw $exception;
         } finally {
-            RuntimeMap::finishRequest($status);
+            try {
+                RuntimeMap::finishRequest($status);
+            } catch (Throwable $exception) {
+                // Tracing must not replace the application's response or exception.
+            }
         }
     }
 
