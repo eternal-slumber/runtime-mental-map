@@ -63,7 +63,7 @@ type TraceSummary struct {
 }
 
 func validate(event Event) error {
-	if event.ProtocolVersion != 1 {
+	if event.ProtocolVersion != protocolVersion {
 		return errors.New("unsupported protocol_version")
 	}
 	if event.ServiceName == "" {
