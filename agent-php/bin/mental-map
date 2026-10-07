@@ -1,0 +1,108 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+$autoload = $_composer_autoload_path ?? getcwd().'/vendor/autoload.php';
+if (is_file($autoload)) {
+    require $autoload;
+} else {
+    require dirname(__DIR__).'/src/RuntimeMap.php';
+    require dirname(__DIR__).'/src/Diagnostics.php';
+}
+
+use RuntimeMentalMap\Diagnostics;
+
+$project = getcwd();
+$command = $argv[1] ?? '';
+$framework = null;
+foreach ($argv as $argument) {
+    if (str_starts_with($argument, '--framework=')) {
+        $framework = substr($argument, strlen('--framework='));
+    }
+}
+
+if ($framework === null && is_file($project.'/composer.json')) {
+    $composer = json_decode((string) file_get_contents($project.'/composer.json'), true);
+    if (is_array($composer)) {
+        $requires = array_merge((array) ($composer['require'] ?? []), (array) ($composer['require-dev'] ?? []));
+        $framework = isset($requires['laravel/framework']) ? 'laravel'
+            : (isset($requires['slim/slim']) ? 'slim' : null);
+    }
+}
+
+if ($framework === 'laravel' && is_file($project.'/artisan')) {
+    $artisanCommand = match ($command) {
+        'init', 'install' => 'mental-map:install',
+        'doctor' => 'mental-map:doctor',
+        default => null,
+    };
+    if ($artisanCommand !== null) {
+        passthru(escapeshellarg(PHP_BINARY).' '.escapeshellarg($project.'/artisan').' '.$artisanCommand, $status);
+        exit($status);
+    }
+}
+
+if ($framework !== 'slim' || !in_array($command, ['init', 'doctor'], true)) {
+    fwrite(STDERR, "Usage: mental-map init|doctor [--framework=slim]\n");
+    exit(1);
+}
+
+$configPath = $project.'/config/mental-map.php';
+if ($command === 'init') {
+    if (is_file($configPath)) {
+        echo "Existing configuration preserved: config/mental-map.php\n";
+    } else {
+        $layers = [];
+        foreach (['Controllers' => 'controller', 'Services' => 'application', 'Actions' => 'application', 'Domain' => 'domain', 'Repositories' => 'repository', 'Infrastructure' => 'repository'] as $directory => $layer) {
+            if (is_dir($project.'/src/'.$directory)) {
+                $layers[$directory] = $layer;
+            }
+        }
+        $name = basename($project);
+        $content = "<?php\n\nreturn [\n"
+            ."    'enabled' => getenv('MENTAL_MAP_ENABLED') !== 'false',\n"
+            ."    'collector_url' => getenv('MENTAL_MAP_COLLECTOR') ?: 'http://127.0.0.1:9000',\n"
+            ."    'service_name' => getenv('MENTAL_MAP_SERVICE_NAME') ?: ".var_export($name, true).",\n"
+            ."    'source_directory' => dirname(__DIR__).'/src',\n"
+            ."    'namespace' => 'App\\\\',\n"
+            ."    'layers' => ".var_export($layers, true).",\n"
+            ."    'exclude' => [],\n];\n";
+        if (!is_dir($project.'/config') && !mkdir($project.'/config', 0775, true)) {
+            fwrite(STDERR, "Cannot create config directory\n");
+            exit(1);
+        }
+        if (file_put_contents($configPath, $content, LOCK_EX) === false) {
+            fwrite(STDERR, "Cannot write config/mental-map.php\n");
+            exit(1);
+        }
+        echo "Slim detected\nConfiguration created: config/mental-map.php\n";
+    }
+    echo "Add to your app setup:\n"
+        .'$app->add(\RuntimeMentalMap\Slim\RuntimeMapMiddleware::fromConfig(require __DIR__."/../config/mental-map.php"));'."\n";
+    echo "Run: vendor/bin/mental-map doctor\n";
+    exit(0);
+}
+
+if (!is_file($configPath)) {
+    fwrite(STDERR, "Configuration missing. Run: vendor/bin/mental-map init\n");
+    exit(1);
+}
+$config = require $configPath;
+if (!is_array($config)) {
+    fwrite(STDERR, "Configuration must return an array\n");
+    exit(1);
+}
+echo "Runtime Mental Map Doctor\n";
+$passed = true;
+foreach (Diagnostics::run($config, (string) ($config['source_directory'] ?? $project.'/src')) as $check) {
+    echo ($check['ok'] ? '✓ ' : '✗ ').$check['label']."\n";
+    if (!$check['ok']) {
+        $passed = false;
+        if ($check['detail'] !== '') {
+            echo '  '.$check['detail']."\n";
+        }
+    }
+}
+echo $passed ? "Runtime Mental Map is ready.\n" : "Fix the failed checks and run doctor again.\n";
+exit($passed ? 0 : 1);
