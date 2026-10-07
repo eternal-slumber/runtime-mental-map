@@ -8,7 +8,13 @@ use Throwable;
 
 final class RuntimeMap
 {
-    private const PROTOCOL_VERSION = 1;
+    public const PROTOCOL_VERSION = 1;
+    private const CONNECT_TIMEOUT_MS = 100;
+    private const TOTAL_TIMEOUT_MS = 350;
+    private const RETRY_AFTER_SECONDS = 10;
+
+    private static float $retryAfter = 0;
+    private static bool $transportWarningLogged = false;
 
     private static string $serviceName = 'php-app';
 
@@ -222,33 +228,58 @@ final class RuntimeMap
         ?string $collectorUrl,
         array $events,
     ): void {
-        if ($collectorUrl === null || $events === []) {
+        if ($collectorUrl === null || $events === [] || microtime(true) < self::$retryAfter) {
             return;
         }
 
         try {
-            $context = stream_context_create([
-                'http' => [
-                    'method' => 'POST',
-                    'header' => "Content-Type: application/json\r\nConnection: close",
-                    'content' => json_encode($events, JSON_THROW_ON_ERROR),
-                    'timeout' => 1.0,
-                    'ignore_errors' => true,
-                ],
-            ]);
-            $result = @file_get_contents(
-                $collectorUrl.'/events/batch',
-                false,
-                $context,
-            );
-            $status = $http_response_header[0] ?? '';
-
-            if ($result === false || !str_contains($status, ' 202 ')) {
-                error_log('RuntimeMap failed to send batch: '.($status ?: 'collector unavailable'));
+            $body = json_encode($events, JSON_THROW_ON_ERROR);
+            if (self::postBatch($collectorUrl.'/events/batch', $body)) {
+                self::$retryAfter = 0;
+                self::$transportWarningLogged = false;
+                return;
             }
         } catch (Throwable $exception) {
-            error_log('RuntimeMap error: '.$exception->getMessage());
+            // Tracing must never replace an application response or exception.
         }
+        self::$retryAfter = microtime(true) + self::RETRY_AFTER_SECONDS;
+        if (!self::$transportWarningLogged && getenv('MENTAL_MAP_DEBUG') === '1') {
+            error_log('Runtime Mental Map: collector unavailable; retrying later');
+            self::$transportWarningLogged = true;
+        }
+    }
+
+    private static function postBatch(string $url, string $body): bool
+    {
+        if (function_exists('curl_init')) {
+            $curl = curl_init($url);
+            if ($curl === false) {
+                return false;
+            }
+            try {
+                curl_setopt_array($curl, [
+                    CURLOPT_POST => true,
+                    CURLOPT_POSTFIELDS => $body,
+                    CURLOPT_HTTPHEADER => ['Content-Type: application/json'],
+                    CURLOPT_CONNECTTIMEOUT_MS => self::CONNECT_TIMEOUT_MS,
+                    CURLOPT_TIMEOUT_MS => self::TOTAL_TIMEOUT_MS,
+                    CURLOPT_RETURNTRANSFER => true,
+                ]);
+                return curl_exec($curl) !== false && curl_getinfo($curl, CURLINFO_RESPONSE_CODE) === 202;
+            } finally {
+                curl_close($curl);
+            }
+        }
+
+        $context = stream_context_create(['http' => [
+            'method' => 'POST',
+            'header' => "Content-Type: application/json\r\nConnection: close",
+            'content' => $body,
+            'timeout' => self::TOTAL_TIMEOUT_MS / 1000,
+            'ignore_errors' => true,
+        ]]);
+        $result = @file_get_contents($url, false, $context);
+        return $result !== false && str_contains($http_response_header[0] ?? '', ' 202 ');
     }
 
     private static function currentSpanId(): ?string

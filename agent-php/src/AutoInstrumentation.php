@@ -13,6 +13,13 @@ use Throwable;
 
 final class AutoInstrumentation
 {
+    private static bool $registered = false;
+
+    public static function isRegistered(): bool
+    {
+        return self::$registered;
+    }
+
     /**
      * @param array<string, string> $layers directory => layer
      * @param list<string> $exclude classes or namespace prefixes
@@ -28,16 +35,12 @@ final class AutoInstrumentation
         array $exclude = [],
     ): void {
         if (!function_exists('OpenTelemetry\\Instrumentation\\hook')) {
-            error_log('RuntimeMap: OpenTelemetry extension is unavailable');
-
             return;
         }
 
         $sourceDirectory = realpath($sourceDirectory);
 
         if ($sourceDirectory === false) {
-            error_log('RuntimeMap: source directory does not exist');
-
             return;
         }
 
@@ -73,6 +76,7 @@ final class AutoInstrumentation
                 }
             }
         }
+        self::$registered = true;
     }
 
     /**
@@ -164,7 +168,11 @@ final class AutoInstrumentation
                 ?string $filename,
                 ?int $line,
             ) use ($layer): void {
-                RuntimeMap::enterAutoSpan($layer, $calledClass, $calledMethod);
+                try {
+                    RuntimeMap::enterAutoSpan($layer, $calledClass, $calledMethod);
+                } catch (Throwable $exception) {
+                    // Instrumentation is best-effort.
+                }
             },
             // No return type: returning null here would replace the original result.
             post: static function (
@@ -173,7 +181,11 @@ final class AutoInstrumentation
                 mixed $returnValue,
                 ?Throwable $exception,
             ) {
-                RuntimeMap::leaveAutoSpan($exception);
+                try {
+                    RuntimeMap::leaveAutoSpan($exception);
+                } catch (Throwable $tracingError) {
+                    // Preserve the application's return value or exception.
+                }
             },
         );
     }

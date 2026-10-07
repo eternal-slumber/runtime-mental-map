@@ -10,6 +10,13 @@ use Throwable;
 
 final class PdoInstrumentation
 {
+    private static bool $registered = false;
+
+    public static function isRegistered(): bool
+    {
+        return self::$registered;
+    }
+
     public static function register(): void
     {
         if (!function_exists('OpenTelemetry\\Instrumentation\\hook')) {
@@ -19,6 +26,7 @@ final class PdoInstrumentation
         self::registerDirectQuery('query');
         self::registerDirectQuery('exec');
         self::registerStatementExecute();
+        self::$registered = true;
     }
 
     private static function registerDirectQuery(string $method): void
@@ -32,7 +40,11 @@ final class PdoInstrumentation
                 mixed $object,
                 array $params,
             ): void {
-                self::enterSql((string) ($params[0] ?? 'unknown'));
+                try {
+                    self::enterSql((string) ($params[0] ?? 'unknown'));
+                } catch (Throwable $exception) {
+                    // SQL execution must proceed without tracing.
+                }
             },
             post: static function (
                 mixed $object,
@@ -40,7 +52,11 @@ final class PdoInstrumentation
                 mixed $returnValue,
                 ?Throwable $exception,
             ) {
-                RuntimeMap::leaveSpan($exception);
+                try {
+                    RuntimeMap::leaveSpan($exception);
+                } catch (Throwable $tracingError) {
+                    // Preserve the database result or exception.
+                }
             },
         );
     }
@@ -60,7 +76,11 @@ final class PdoInstrumentation
                     ? $object->queryString
                     : 'unknown';
 
-                self::enterSql($sql);
+                try {
+                    self::enterSql($sql);
+                } catch (Throwable $exception) {
+                    // SQL execution must proceed without tracing.
+                }
             },
             post: static function (
                 mixed $object,
@@ -68,7 +88,11 @@ final class PdoInstrumentation
                 mixed $returnValue,
                 ?Throwable $exception,
             ) {
-                RuntimeMap::leaveSpan($exception);
+                try {
+                    RuntimeMap::leaveSpan($exception);
+                } catch (Throwable $tracingError) {
+                    // Preserve the database result or exception.
+                }
             },
         );
     }
